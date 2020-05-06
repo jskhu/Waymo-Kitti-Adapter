@@ -1,3 +1,5 @@
+import argparse
+
 import os
 import math
 # import time
@@ -11,11 +13,13 @@ from waymo_open_dataset.utils import range_image_utils
 from waymo_open_dataset.utils import transform_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
 
+import pdb 
+
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
-DATA_PATH = '/home/cyrus/Research/Waymo_Kitti_Adapter/waymo_dataset'
+DATA_PATH = '/home/trail/datasets/Waymo/original/train/training_0000'
 # path to save kitti dataset
-KITTI_PATH = '/home/cyrus/Research/Waymo_Kitti_Adapter/kitti_dataset'
+KITTI_PATH = '/home/trail/datasets/Waymo/reformatted/train'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = True
 LOCATION_NAME = ['location_sf']
@@ -29,6 +33,7 @@ LABEL_ALL_PATH = KITTI_PATH + '/label_all'
 IMAGE_PATH = KITTI_PATH + '/image_'
 CALIB_PATH = KITTI_PATH + '/calib'
 LIDAR_PATH = KITTI_PATH + '/lidar'
+keyframes = True 
 ###############################################################################
 
 class Adapter:
@@ -39,7 +44,7 @@ class Adapter:
         self.get_file_names()
         self.create_folder()
 
-    def cvt(self):
+    def cvt(self, args):
         """ convert dataset from Waymo to KITTI
         Args:
         return:
@@ -56,51 +61,67 @@ class Adapter:
         bar.start()
         for file_name in self.__file_names:
             dataset = tf.data.TFRecordDataset(file_name, compression_type='')
-            for data in dataset:
+            if args.keyframes == True:
                 frame = open_dataset.Frame()
-                frame.ParseFromString(bytearray(data.numpy()))
+                frame.ParseFromString(bytearray(next(iter(dataset)).numpy()))
                 if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
                     continue
 
                 # save the image:
-                # s1 = time.time()
-                self.save_image(frame, frame_num)
-                # e1 = time.time()
+                self.save_image(frame, frame_num, args.camera_type)
 
                 # parse the calib
-                # s2 = time.time()
                 self.save_calib(frame, frame_num)
-                # e2 = time.time()
 
                 # parse lidar
-                # s3 = time.time()
                 self.save_lidar(frame, frame_num)
-                # e3 = time.time()
 
                 # parse label
-                # s4 = time.time()
-                self.save_label(frame, frame_num)
-                # e4 = time.time()
-
-                # print("image:{}\ncalib:{}\nlidar:{}\nlabel:{}\n".format(str(s1-e1),str(s2-e2),str(s3-e3),str(s4-e4)))
-
+                self.save_label(frame, frame_num, args.camera_type)
                 frame_num += 1
+            else: 
+                for data in dataset:
+                    frame = open_dataset.Frame()
+                    frame.ParseFromString(bytearray(data.numpy()))
+                    if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
+                        continue
+    
+                    # save the image:
+                    self.save_image(frame, frame_num)
+
+                    # parse the calib
+                    self.save_calib(frame, frame_num)
+    
+                    # parse lidar
+                    self.save_lidar(frame, frame_num)
+    
+                    # parse label
+                    self.save_label(frame, frame_num)
+    
+                    frame_num += 1
             bar.update(file_num)
             file_num += 1
         bar.finish()
         print("\nfinished ...")
 
-    def save_image(self, frame, frame_num):
+    def save_image(self, frame, frame_num, cam_type):
         """ parse and save the images in png format
                 :param frame: open dataset frame proto
                 :param frame_num: the current frame number
                 :return:
         """
         for img in frame.images:
-            img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
-            img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
-            rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
+            if cam_type == 'all':
+                img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
+                img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
+                rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
+            else:
+                if cam_type == str(img.name-1):
+                    img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
+                    img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
+                    rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
 
     def save_calib(self, frame, frame_num):
         """ parse and save the calibration data
@@ -161,7 +182,7 @@ class Adapter:
         pc_path = LIDAR_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.bin'
         point_cloud.tofile(pc_path)
 
-    def save_label(self, frame, frame_num):
+    def save_label(self, frame, frame_num, cam_type):
         """ parse and save the label data in .txt format
                 :param frame: open dataset frame proto
                 :param frame_num: the current frame number
@@ -222,10 +243,16 @@ class Adapter:
                                                                                    round(z, 2),
                                                                                    round(rotation_y, 2))
             line_all = line[:-1] + ' ' + name + '\n'
-            # store the label
-            fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
-            fp_label.write(line)
-            fp_label.close()
+            # store the label]
+            if cam_type == 'all':
+                fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
+                fp_label.write(line)
+                fp_label.close()
+            else:
+                if name ==cam_type:
+                    fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
+                    fp_label.write(line)
+                    fp_label.close()
 
             fp_label_all.write(line_all)
         fp_label_all.close()
@@ -453,7 +480,7 @@ class Adapter:
         return c
 
     def plot_image(self, camera_image):
-        """Plot a cmaera image."""
+        """Plot a camera image."""
         plt.figure(figsize=(20, 12))
         plt.imshow(tf.image.decode_jpeg(camera_image.image))
         plt.grid("off")
@@ -481,5 +508,15 @@ class Adapter:
         plt.scatter(xs, ys, c=colors, s=point_size, edgecolors="none")
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Save Waymo dataset into Kitti format')
+    parser.add_argument('--keyframes',
+                        type=bool,
+                        default=True,
+                        help='If True, saves only the first frame from each scene')
+    parser.add_argument('--camera_type',
+                        type=str,
+                        default="1",
+                        help='Select camera views to save. Input argument from 0 to 4 or all')
+    args = parser.parse_args()
     adapter = Adapter()
-    adapter.cvt()
+    adapter.cvt(args)
