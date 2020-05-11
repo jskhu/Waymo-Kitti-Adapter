@@ -1,6 +1,7 @@
 import argparse
 
 import os
+
 import math
 # import time
 import numpy as np
@@ -13,28 +14,82 @@ from waymo_open_dataset.utils import range_image_utils
 from waymo_open_dataset.utils import transform_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
 
-import pdb 
-
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
-DATA_PATH = '/home/trail/datasets/Waymo/original/train/training_0000'
+DATA_PATH = '/home/trail/datasets/Waymo/original/test/testing_0000'
 # path to save kitti dataset
-KITTI_PATH = '/home/trail/datasets/Waymo/reformatted/train'
+KITTI_PATH = '/home/trail/datasets/Waymo/waymo/testing'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = True
 LOCATION_NAME = ['location_sf']
 # max indexing length
 INDEX_LENGTH = 15
 # as name
-IMAGE_FORMAT = 'jpg'
+IMAGE_FORMAT = 'png'
 # do not change
 LABEL_PATH = KITTI_PATH + '/label_'
 LABEL_ALL_PATH = KITTI_PATH + '/label_all'
 IMAGE_PATH = KITTI_PATH + '/image_'
 CALIB_PATH = KITTI_PATH + '/calib'
-LIDAR_PATH = KITTI_PATH + '/lidar'
-keyframes = True 
+LIDAR_PATH = KITTI_PATH + '/velodyne'
 ###############################################################################
+
+def isclose(x, y, rtol=1.e-5, atol=1.e-8):
+    return abs(x-y) <= atol + rtol * abs(y)
+
+def euler_angles_from_rotation_matrix(R):
+    '''
+    From a paper by Gregory G. Slabaugh (undated),
+    "Computing Euler angles from a rotation matrix
+    '''
+    phi = 0.0
+    if isclose(R[2,0],-1.0):
+        theta = math.pi/2.0
+        psi = math.atan2(R[0,1],R[0,2])
+    elif isclose(R[2,0],1.0):
+        theta = -math.pi/2.0
+        psi = math.atan2(-R[0,1],-R[0,2])
+    else:
+        theta = -math.asin(R[2,0])
+        cos_theta = math.cos(theta)
+        psi = math.atan2(R[2,1]/cos_theta, R[2,2]/cos_theta)
+        phi = math.atan2(R[1,0]/cos_theta, R[0,0]/cos_theta)
+    return psi, theta, phi
+
+def rotx(t):
+    """ 3D Rotation about the x-axis. """
+    c = np.cos(t)
+    s = np.sin(t)
+    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+
+
+def roty(t):
+    """ Rotation about the y-axis. """
+    c = np.cos(t)
+    s = np.sin(t)
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+
+def rotz(t):
+    """ Rotation about the z-axis. """
+    c = np.cos(t)
+    s = np.sin(t)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+def get_box_transformation_matrix(obj_loc, obj_size, ry):
+    """Create a transformation matrix for a given label box pose."""
+
+    tx,ty,tz = obj_loc
+    c = math.cos(ry)
+    s = math.sin(ry)
+
+    sl, sh, sw = obj_size
+
+    return np.array([
+        [ sl*c,-sw*s,  0,tx],
+        [ sl*s, sw*c,  0,ty],
+        [    0,    0, sh,tz],
+        [    0,    0,  0, 1]])
 
 class Adapter:
     def __init__(self):
@@ -42,13 +97,14 @@ class Adapter:
         self.__type_list = ['UNKNOWN', 'VEHICLE', 'PEDESTRIAN', 'SIGN', 'CYCLIST']
 
         self.get_file_names()
-        self.create_folder()
 
     def cvt(self, args):
         """ convert dataset from Waymo to KITTI
         Args:
         return:
         """
+        self.create_folder(args.camera_type)
+
         bar = progressbar.ProgressBar(maxval=len(self.__file_names)+1,
                     widgets= [progressbar.Percentage(), ' ',
                     progressbar.Bar(marker='>',left='[',right=']'),' ',
@@ -57,48 +113,44 @@ class Adapter:
         tf.enable_eager_execution()
         file_num = 1
         frame_num = 0
+        frame_name = args.start_ind
         print("start converting ...")
         bar.start()
-        for file_name in self.__file_names:
+        for file_idx, file_name in enumerate(self.__file_names):
+            print('File {}/{}'.format(file_idx, len(self.__file_names)))
             dataset = tf.data.TFRecordDataset(file_name, compression_type='')
-            if args.keyframes == True:
+            for data in dataset:
                 frame = open_dataset.Frame()
-                frame.ParseFromString(bytearray(next(iter(dataset)).numpy()))
-                if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
-                    continue
+                frame.ParseFromString(bytearray(data.numpy()))
 
-                # save the image:
-                self.save_image(frame, frame_num, args.camera_type)
-
-                # parse the calib
-                self.save_calib(frame, frame_num)
-
-                # parse lidar
-                self.save_lidar(frame, frame_num)
-
-                # parse label
-                self.save_label(frame, frame_num, args.camera_type)
-                frame_num += 1
-            else: 
-                for data in dataset:
-                    frame = open_dataset.Frame()
-                    frame.ParseFromString(bytearray(data.numpy()))
+                if (frame_num%args.keyframe) == 0: 
                     if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
                         continue
     
                     # save the image:
-                    self.save_image(frame, frame_num)
+                    # s1 = time.time()
+                    self.save_image(frame, frame_name, args.camera_type)
+                    # e1 = time.time()
 
                     # parse the calib
-                    self.save_calib(frame, frame_num)
+                    # s2 = time.time()
+                    self.save_calib(frame, frame_name)
+                    # e2 = time.time()
     
                     # parse lidar
-                    self.save_lidar(frame, frame_num)
+                    # s3 = time.time()
+                    self.save_lidar(frame, frame_name)
+                    # e3 = time.time()
     
                     # parse label
-                    self.save_label(frame, frame_num)
-    
-                    frame_num += 1
+                    # s4 = time.time()
+                    self.save_label(frame, frame_name, args.camera_type)
+                    # e4 = time.time()
+
+                    # print("image:{}\ncalib:{}\nlidar:{}\nlabel:{}\n".format(str(s1-e1),str(s2-e2),str(s3-e3),str(s4-e4)))
+                    frame_name += 1
+
+                frame_num += 1
             bar.update(file_num)
             file_num += 1
         bar.finish()
@@ -111,19 +163,13 @@ class Adapter:
                 :return:
         """
         for img in frame.images:
-            if cam_type == 'all':
+            if cam_type == 'all' or cam_type == str(img.name-1):
                 img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
                 img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
                 rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
-            else:
-                if cam_type == str(img.name-1):
-                    img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
-                    img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
-                    rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                    plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
 
-    def save_calib(self, frame, frame_num):
+    def save_calib(self, frame, frame_num, kitti_format=True):
         """ parse and save the calibration data
                 :param frame: open dataset frame proto
                 :param frame_num: the current frame number
@@ -138,8 +184,14 @@ class Adapter:
 
         for camera in frame.context.camera_calibrations:
             tmp=np.array(camera.extrinsic.transform).reshape(4,4)
-            tmp=np.linalg.inv(tmp).reshape((16,))
-            Tr_velo_to_cam.append(["%e" % i for i in tmp])
+            tmp=np.linalg.inv(tmp)
+            axes_transformation = np.array([[0,-1,0,0],
+                                            [0,0,-1,0],
+                                            [1,0,0,0],
+                                            [0,0,0,1]])
+            tmp = np.matmul(axes_transformation, tmp)
+            tmp = tmp.reshape((16,))
+            Tr_velo_to_cam.append(["%e" % i for i in tmp[0:12]])
 
         for cam in frame.context.camera_calibrations:
             tmp=np.zeros((3,4))
@@ -148,7 +200,8 @@ class Adapter:
             tmp[0,2]=cam.intrinsic[2]
             tmp[1,2]=cam.intrinsic[3]
             tmp[2,2]=1
-            tmp=(tmp @ waymo_cam_RT)
+            if not kitti_format:
+                tmp=(tmp @ waymo_cam_RT)
             tmp=list(tmp.reshape(12))
             tmp = ["%e" % i for i in tmp]
             camera_calib.append(tmp)
@@ -182,7 +235,7 @@ class Adapter:
         pc_path = LIDAR_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.bin'
         point_cloud.tofile(pc_path)
 
-    def save_label(self, frame, frame_num, cam_type):
+    def save_label(self, frame, frame_num, cam_type, kitti_format=True):
         """ parse and save the label data in .txt format
                 :param frame: open dataset frame proto
                 :param frame_num: the current frame number
@@ -199,6 +252,19 @@ class Adapter:
                         label.box.center_x + label.box.length / 2, label.box.center_y + label.box.width / 2]
                 id_to_bbox[label.id] = bbox
                 id_to_name[label.id] = name - 1
+
+        Tr_velo_to_cam = []
+
+        if kitti_format:
+            for camera in frame.context.camera_calibrations:
+                tmp=np.array(camera.extrinsic.transform).reshape(4,4)
+                tmp=np.linalg.inv(tmp)
+                axes_transformation = np.array([[0,-1,0,0],
+                                            [0,0,-1,0],
+                                            [1,0,0,0],
+                                            [0,0,0,1]])
+                tmp = np.matmul(axes_transformation, tmp)
+                Tr_velo_to_cam.append(tmp)
 
         for obj in frame.laser_labels:
 
@@ -224,6 +290,24 @@ class Adapter:
             y = obj.box.center_y
             z = obj.box.center_z
             rotation_y = obj.box.heading
+
+            if kitti_format:
+                z -= height/2
+                
+                transform_box_to_cam = Tr_velo_to_cam[int(name)] @ get_box_transformation_matrix((x, y, z),(length,height,width), rotation_y)
+                pt1 = np.array([-0.5, 0.5, 0 , 1.])
+                pt2 = np.array([0.5, 0.5, 0 , 1.])
+                pt1 = np.matmul(transform_box_to_cam, pt1)
+                pt2 = np.matmul(transform_box_to_cam, pt2)
+                new_ry = math.atan2(pt2[2]-pt1[2],pt2[0]-pt1[0])
+                rotation_y = -new_ry
+
+                new_loc = np.matmul(Tr_velo_to_cam[int(name)], np.array([x,y,z,1]).T)
+                x, y, z = new_loc[:3]
+
+                
+        
+
             beta = math.atan2(x, z)
             alpha = (rotation_y + beta - math.pi / 2) % (2 * math.pi)
 
@@ -243,16 +327,11 @@ class Adapter:
                                                                                    round(z, 2),
                                                                                    round(rotation_y, 2))
             line_all = line[:-1] + ' ' + name + '\n'
-            # store the label]
-            if cam_type == 'all':
-                fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
-                fp_label.write(line)
-                fp_label.close()
-            else:
-                if name ==cam_type:
-                    fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
-                    fp_label.write(line)
-                    fp_label.close()
+            # store the label
+            if cam_type =='all' or name == cam_type:
+               fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
+               fp_label.write(line)
+               fp_label.close()
 
             fp_label_all.write(line_all)
         fp_label_all.close()
@@ -263,7 +342,7 @@ class Adapter:
             if i.split('.')[-1] == 'tfrecord':
                 self.__file_names.append(DATA_PATH + '/' + i)
 
-    def create_folder(self):
+    def create_folder(self, cam_type):
         if not os.path.exists(KITTI_PATH):
             os.mkdir(KITTI_PATH)
         if not os.path.exists(CALIB_PATH):
@@ -273,10 +352,11 @@ class Adapter:
         if not os.path.exists(LABEL_ALL_PATH):
             os.mkdir(LABEL_ALL_PATH)
         for i in range(5):
-            if not os.path.exists(IMAGE_PATH + str(i)):
-                os.mkdir(IMAGE_PATH + str(i))
-            if not os.path.exists(LABEL_PATH + str(i)):
-                os.mkdir(LABEL_PATH + str(i))
+            if cam_type == 'all' or cam_type == str(i):
+                if not os.path.exists(IMAGE_PATH + str(i)):
+                    os.mkdir(IMAGE_PATH + str(i))
+                if not os.path.exists(LABEL_PATH + str(i)):
+                    os.mkdir(LABEL_PATH + str(i))
 
     def extract_intensity(self, frame, range_images, lidar_num):
         """ extract the intensity from the original range image
@@ -480,7 +560,7 @@ class Adapter:
         return c
 
     def plot_image(self, camera_image):
-        """Plot a camera image."""
+        """Plot a cmaera image."""
         plt.figure(figsize=(20, 12))
         plt.imshow(tf.image.decode_jpeg(camera_image.image))
         plt.grid("off")
@@ -509,14 +589,18 @@ class Adapter:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Save Waymo dataset into Kitti format')
-    parser.add_argument('--keyframes',
-                        type=bool,
-                        default=True,
-                        help='If True, saves only the first frame from each scene')
+    parser.add_argument('--keyframe',
+                        type=int,
+                        default=10,
+                        help='Saves every specified # of scenes. Default is 1 and the program saves every scene')
     parser.add_argument('--camera_type',
                         type=str,
-                        default="1",
+                        default="0",
                         help='Select camera views to save. Input argument from 0 to 4 or all')
+    parser.add_argument('--start_ind',
+                        type=int,
+                        default=0,
+                        help='File number starts counting from this index')
     args = parser.parse_args()
     adapter = Adapter()
     adapter.cvt(args)
