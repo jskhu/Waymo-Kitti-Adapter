@@ -1,5 +1,4 @@
 import argparse
-
 import os
 
 import math
@@ -13,7 +12,7 @@ import progressbar
 from waymo_open_dataset.utils import range_image_utils
 from waymo_open_dataset.utils import transform_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
-
+from adapter_lib import *
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
 DATA_PATH = '/home/trail/datasets/Waymo/original/test/testing_0000'
@@ -33,63 +32,6 @@ IMAGE_PATH = KITTI_PATH + '/image_'
 CALIB_PATH = KITTI_PATH + '/calib'
 LIDAR_PATH = KITTI_PATH + '/velodyne'
 ###############################################################################
-
-def isclose(x, y, rtol=1.e-5, atol=1.e-8):
-    return abs(x-y) <= atol + rtol * abs(y)
-
-def euler_angles_from_rotation_matrix(R):
-    '''
-    From a paper by Gregory G. Slabaugh (undated),
-    "Computing Euler angles from a rotation matrix
-    '''
-    phi = 0.0
-    if isclose(R[2,0],-1.0):
-        theta = math.pi/2.0
-        psi = math.atan2(R[0,1],R[0,2])
-    elif isclose(R[2,0],1.0):
-        theta = -math.pi/2.0
-        psi = math.atan2(-R[0,1],-R[0,2])
-    else:
-        theta = -math.asin(R[2,0])
-        cos_theta = math.cos(theta)
-        psi = math.atan2(R[2,1]/cos_theta, R[2,2]/cos_theta)
-        phi = math.atan2(R[1,0]/cos_theta, R[0,0]/cos_theta)
-    return psi, theta, phi
-
-def rotx(t):
-    """ 3D Rotation about the x-axis. """
-    c = np.cos(t)
-    s = np.sin(t)
-    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
-
-
-def roty(t):
-    """ Rotation about the y-axis. """
-    c = np.cos(t)
-    s = np.sin(t)
-    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
-
-
-def rotz(t):
-    """ Rotation about the z-axis. """
-    c = np.cos(t)
-    s = np.sin(t)
-    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-
-def get_box_transformation_matrix(obj_loc, obj_size, ry):
-    """Create a transformation matrix for a given label box pose."""
-
-    tx,ty,tz = obj_loc
-    c = math.cos(ry)
-    s = math.sin(ry)
-
-    sl, sh, sw = obj_size
-
-    return np.array([
-        [ sl*c,-sw*s,  0,tx],
-        [ sl*s, sw*c,  0,ty],
-        [    0,    0, sh,tz],
-        [    0,    0,  0, 1]])
 
 class Adapter:
     def __init__(self):
@@ -127,25 +69,14 @@ class Adapter:
                     if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
                         continue
     
-                    # save the image:
-                    # s1 = time.time()
                     self.save_image(frame, frame_name, args.camera_type)
-                    # e1 = time.time()
-
-                    # parse the calib
-                    # s2 = time.time()
+   
                     self.save_calib(frame, frame_name)
-                    # e2 = time.time()
-    
-                    # parse lidar
-                    # s3 = time.time()
+
                     self.save_lidar(frame, frame_name)
-                    # e3 = time.time()
-    
-                    # parse label
-                    # s4 = time.time()
-                    self.save_label(frame, frame_name, args.camera_type)
-                    # e4 = time.time()
+
+                    if args.test == False:
+                    	self.save_label(frame, frame_name, args.camera_type)
 
                     # print("image:{}\ncalib:{}\nlidar:{}\nlabel:{}\n".format(str(s1-e1),str(s2-e2),str(s3-e3),str(s4-e4)))
                     frame_name += 1
@@ -242,6 +173,10 @@ class Adapter:
                 :return:
                 """
         fp_label_all = open(LABEL_ALL_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
+        for i in range(0,5):
+        	if cam_type == 'all' or int(cam_type) == i:
+        	   open(LABEL_PATH + str(i) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
+
         # preprocess bounding box data
         id_to_bbox = dict()
         id_to_name = dict()
@@ -601,6 +536,10 @@ if __name__ == '__main__':
                         type=int,
                         default=0,
                         help='File number starts counting from this index')
+    parser.add_argument('--test',
+                        type=bool,
+                        default=False,
+                        help='if true, does not save any ground truth data')
     args = parser.parse_args()
     adapter = Adapter()
     adapter.cvt(args)
