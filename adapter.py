@@ -13,13 +13,15 @@ from waymo_open_dataset.utils import range_image_utils
 from waymo_open_dataset.utils import transform_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
 from adapter_lib import *
+
+import pdb
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
-DATA_PATH = '/home/trail/datasets/Waymo/original/test/testing_0000'
+DATA_PATH = '/media/trail/harddrive/datasets/Waymo/original/training'
 # path to save kitti dataset
-KITTI_PATH = '/home/trail/datasets/Waymo/waymo/testing'
+KITTI_PATH = '/media/trail/harddrive/datasets/Waymo/waymo/training'
 # location filter, use this to convert your preferred location
-LOCATION_FILTER = True
+LOCATION_FILTER = False
 LOCATION_NAME = ['location_sf']
 # max indexing length
 INDEX_LENGTH = 15
@@ -37,14 +39,17 @@ class Adapter:
     def __init__(self):
         self.__lidar_list = ['_FRONT', '_FRONT_RIGHT', '_FRONT_LEFT', '_SIDE_RIGHT', '_SIDE_LEFT']
         self.__type_list = ['UNKNOWN', 'VEHICLE', 'PEDESTRIAN', 'SIGN', 'CYCLIST']
+        self.__file_names = []      
 
-        self.get_file_names()
-
-    def cvt(self, args):
+    def cvt(self, args, folder, start_ind):
         """ convert dataset from Waymo to KITTI
         Args:
         return:
         """
+        self.start_ind = start_ind
+        self.get_file_names(DATA_PATH + '/'+folder)
+        print("Converting ..." + folder)
+
         self.create_folder(args.camera_type)
 
         bar = progressbar.ProgressBar(maxval=len(self.__file_names)+1,
@@ -55,7 +60,8 @@ class Adapter:
         tf.enable_eager_execution()
         file_num = 1
         frame_num = 0
-        frame_name = args.start_ind
+        frame_name = self.start_ind
+        label_exists = False
         print("start converting ...")
         bar.start()
         for file_idx, file_name in enumerate(self.__file_names):
@@ -68,24 +74,27 @@ class Adapter:
                 if (frame_num%args.keyframe) == 0: 
                     if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
                         continue
-    
+                    if args.test == False:
+                    	label_exists = self.save_label(frame, frame_name, args.camera_type)
+                    
+                    if args.test == label_exists:
+                        frame_num += 1
+                        continue
                     self.save_image(frame, frame_name, args.camera_type)
    
                     self.save_calib(frame, frame_name)
 
                     self.save_lidar(frame, frame_name)
 
-                    if args.test == False:
-                    	self.save_label(frame, frame_name, args.camera_type)
-
                     # print("image:{}\ncalib:{}\nlidar:{}\nlabel:{}\n".format(str(s1-e1),str(s2-e2),str(s3-e3),str(s4-e4)))
-                    frame_name += 1
+                    frame_name +=1
 
                 frame_num += 1
             bar.update(file_num)
             file_num += 1
         bar.finish()
         print("\nfinished ...")
+        return frame_name
 
     def save_image(self, frame, frame_num, cam_type):
         """ parse and save the images in png format
@@ -189,6 +198,7 @@ class Adapter:
                 id_to_name[label.id] = name - 1
 
         Tr_velo_to_cam = []
+        recorded_label = []
 
         if kitti_format:
             for camera in frame.context.camera_calibrations:
@@ -266,16 +276,19 @@ class Adapter:
             if cam_type =='all' or name == cam_type:
                fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
                fp_label.write(line)
+               recorded_label.append(line)
                fp_label.close()
 
             fp_label_all.write(line_all)
         fp_label_all.close()
+        if len(recorded_label)==0: 
+            return False
+        return True
 
-    def get_file_names(self):
-        self.__file_names = []
-        for i in os.listdir(DATA_PATH):
+    def get_file_names(self, folder):
+        for i in os.listdir(folder):
             if i.split('.')[-1] == 'tfrecord':
-                self.__file_names.append(DATA_PATH + '/' + i)
+                self.__file_names.append(folder + '/'+ i)
 
     def create_folder(self, cam_type):
         if not os.path.exists(KITTI_PATH):
@@ -522,6 +535,7 @@ class Adapter:
 
         plt.scatter(xs, ys, c=colors, s=point_size, edgecolors="none")
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Save Waymo dataset into Kitti format')
     parser.add_argument('--keyframe',
@@ -541,5 +555,9 @@ if __name__ == '__main__':
                         default=False,
                         help='if true, does not save any ground truth data')
     args = parser.parse_args()
-    adapter = Adapter()
-    adapter.cvt(args)
+    start_ind = args.start_ind
+    path, dirs, files = next(os.walk(DATA_PATH))
+    for directory in dirs:
+        adapter = Adapter()
+        last_ind = adapter.cvt(args, directory, start_ind)
+        start_ind = last_ind
