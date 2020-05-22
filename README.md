@@ -45,12 +45,12 @@ This is a tool converting [Waymo open dataset](https://waymo.com/open/) format t
 │   │   │──testing
 ```
 Create the `adapted` folder in `Waymo` directory with `training`, `validation` and `testing` folders inside. These will be locations that the adapter will save to. 
-4. Run the adapter.py to save training data. Set DATA_PATH to be '{YOUR PATH}/Waymo/original/training' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/training'. 
+4. Run `adapter.py` to save training data. Set `DATA_PATH` to be '{YOUR PATH}/Waymo/original/training' and `KITTI_PATH` to be '{YOUR PATH}/Waymo/adapted/training'. 
 ```shell
 python adapter.py 
 ```
-5. Run the adapter.py to save validation data. Change DATA_PATH to be '{YOUR PATH}/Waymo/original/validation' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/validation'. 
-6. Run the adapter.py to save testing data. Change DATA_PATH to be '{YOUR PATH}/Waymo/original/testing' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/testing'. Add the config option --test True.
+5. Run `adapter.py` to save validation data. Change `DATA_PATH` to be '{YOUR PATH}/Waymo/original/validation' and `KITTI_PATH` to be '{YOUR PATH}/Waymo/adapted/validation'. 
+6. Run `adapter.py` to save testing data. Change `DATA_PATH` to be '{YOUR PATH}/Waymo/original/testing' and `KITTI_PATH` to be '{YOUR PATH}/Waymo/adapted/testing'. Add the config option --test True.
 ```shell
 python adapter.py --test True 
 ```
