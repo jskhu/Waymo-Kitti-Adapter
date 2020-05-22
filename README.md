@@ -1,44 +1,73 @@
 # Waymo_Kitti_Adapter
-This is a tool converting [Waymo open dataset](https://waymo.com/open/) format to [Kitti dataset](http://www.cvlibs.net/datasets/kitti/) format.
+This is a tool converting [Waymo open dataset](https://waymo.com/open/) format to [Kitti dataset](http://www.cvlibs.net/datasets/kitti/) format. This tool was modified from the following repositories: 
 > Original Repository: https://github.com/Yao-Shao/Waymo_Kitti_Adapter
->
+> Forked Repository: https://github.com/RocketFlash/Waymo_Kitti_Adapter
 > 
 ## Instruction
-0. Follow the instructons in [QuickStart.md](https://github.com/Yao-Shao/Waymo_Kitti_Adapter/blob/master/QuickStart.md), clone the [waymo open dataset repo](https://github.com/waymo-research/waymo-open-dataset), build and test it. 
-1. Clone this repo to your computer, then copy the files in `protocol buffer` folder and paste them into `waymo open dataset` folder.
-2. Copy adapter.py to `waymo-od` folder. Open adapter.py and change the configurations at the top so that it suits to your own computer's path.
-3. The folder tree may look like this, the downloaded waymo dataset should be in the folder named `waymo_dataset`, and the generated kitti dataset should be in the folder `kitti_dataset/`. Feel free to change them to your preferred path by rewriting the configurations in `adapter.py`.
-``` 
-.
-├── adapter.py
-├── waymo_open_dataset
-│   ├── label_pb2.py
-│   ├── label.proto
-│   └── ...
-├── waymo_dataset
-│   └── frames
-├── kitti_dataset
-│   ├── calib
-│   ├── image_0
-│   ├── image_1
-│   ├── image_2
-│   ├── image_3
-│   ├── image_4
-│   ├── lidar
-│   └── label
-├── configure.sh
-├── CONTRIBUTING.md
-├── docs
-├── LICENSE
-├── QuickStart.md
-├── README.md
-├── tf
-├── third_party
-├── tutorial
-└── WORKSPACE
+0. Download the [Waymo dataset](https://waymo.com/open/). Create the waymo folder on your machine and organize the downloaded files as follows: 
 ```
-
-4. Run adapter.py.
+├── Waymo
+│   ├── original
+│   │   │──training
+│   │   │   ├──training_0000 
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──training_0001
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──... 
+│   │   │──validation
+│   │   │   ├──validation_0000 
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──validation_0001
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──... 
+│   │   │──testing
+│   │   │   ├──testing_0000 
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──testing_0001
+│   │   │   │   ├─.tfrecord files 
+│   │   │   ├──... 
+```
+1. Clone the [waymo open dataset repo](https://github.com/waymo-research/waymo-open-dataset) and follow the instructions on its [Quick Start Page](https://github.com/waymo-research/waymo-open-dataset/blob/master/docs/quick_start.md) in order to build and test it. 
+2. Clone this repo to your computer, then copy the files in `protocol buffer` folder and paste them into `waymo open dataset` folder.
+3. Copy adapter.py to `waymo-od` folder. Open adapter.py and change the configurations at the top so that it suits to your own computer's path. We recommend the following folder structure:
+```
+├── Waymo
+│   ├── original
+│   │   │──training
+│   │   │   ├──training_0000, ...
+│   │   │──validation
+│   │   │   ├──validation_0000, ...
+│   │   │──testing
+│   │   │   ├──testing_0000...
+│   ├── adapted
+│   │   │──training
+│   │   │──validation
+│   │   │──testing
+```
+Create the `adapted` folder in `Waymo` directory with `training`, `validation` and `testing` folders inside. These will be locations that the adapter will save to. 
+4. Run the adapter.py to save training data. Set DATA_PATH to be '{YOUR PATH}/Waymo/original/training' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/training'. 
+```shell
+python adapter.py 
+```
+5. Run the adapter.py to save validation data. Change DATA_PATH to be '{YOUR PATH}/Waymo/original/validation' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/validation'. 
+6. Run the adapter.py to save testing data. Change DATA_PATH to be '{YOUR PATH}/Waymo/original/testing' and KITTI_PATH to be '{YOUR PATH}/Waymo/adapted/testing'. Add the config option --test True.
+```shell
+python adapter.py --test True 
+```
+4. Once completed, the folder tree will look like this:
+```
+...
+├── Waymo
+│   ├── original
+│   │   │──training & testing & validation
+│   ├── adapted
+│   │   │──training
+│   │   │   ├──calib & velodyne & label_0 & image_0
+│   │   │──testing
+│   │   │   ├──calib & velodyne & label_0
+│   │   │──testing
+│   │   │   ├──calib & velodyne & label_0 & image_0
+```
 
 ## Data specification
 
