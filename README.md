@@ -29,7 +29,7 @@ This is a tool converting [Waymo open dataset](https://waymo.com/open/) format t
 ```
 1. Clone the [waymo open dataset repo](https://github.com/waymo-research/waymo-open-dataset) and follow the instructions on its [Quick Start Page](https://github.com/waymo-research/waymo-open-dataset/blob/master/docs/quick_start.md) in order to build and test it. 
 2. Clone this repo to your computer, then copy the files in `protocol buffer` folder and paste them into `waymo open dataset` folder.
-3. Copy adapter.py to `waymo-od` folder. Open adapter.py and change the configurations at the top so that it suits to your own computer's path. We recommend the following folder structure:
+3. Copy adapter.py to `waymo-od` folder and set up the (our recommendation) following folder structure: 
 ```
 ├── Waymo
 │   ├── original
@@ -45,7 +45,7 @@ This is a tool converting [Waymo open dataset](https://waymo.com/open/) format t
 │   │   │──testing
 ```
 Create the `adapted` folder in `Waymo` directory with `training`, `validation` and `testing` folders inside. These will be locations that the adapter will save to. 
-4. Run `adapter.py` to save training data. Set `DATA_PATH` to be '{YOUR PATH}/Waymo/original/training' and `KITTI_PATH` to be '{YOUR PATH}/Waymo/adapted/training'. 
+4. Run `adapter.py` to save training data. Before running, open `adapter.py` and change the configurations at the top so that it suits to your own computer's path. Set `DATA_PATH` to be '{YOUR PATH}/Waymo/original/training' and `KITTI_PATH` to be '{YOUR PATH}/Waymo/adapted/training'. 
 ```shell
 python adapter.py 
 ```
