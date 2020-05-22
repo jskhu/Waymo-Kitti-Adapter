@@ -17,9 +17,9 @@ from adapter_lib import *
 import pdb
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
-DATA_PATH = '/media/trail/harddrive/datasets/Waymo/original/training'
+DATA_PATH = '/media/trail/harddrive/datasets/Waymo/original/validation'
 # path to save kitti dataset
-KITTI_PATH = '/media/trail/harddrive/datasets/Waymo/waymo/training'
+KITTI_PATH = '/media/trail/harddrive/datasets/Waymo/waymo/validation'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = False
 LOCATION_NAME = ['location_sf']
