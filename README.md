@@ -4,7 +4,7 @@ This is a tool converting [Waymo open dataset](https://waymo.com/open/) format t
 > Forked Repository: https://github.com/RocketFlash/Waymo_Kitti_Adapter
 > 
 ## Instruction
-0. Download the [Waymo dataset](https://waymo.com/open/). Create the waymo folder on your machine and organize the downloaded files as follows: 
+0. Download the [Waymo dataset](https://waymo.com/open/). Create a `Waymo` folder on your machine and organize the downloaded files as follows: 
 ```
 ├── Waymo
 │   ├── original
