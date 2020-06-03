@@ -11,6 +11,8 @@ import progressbar
 
 from waymo_open_dataset.utils import range_image_utils
 from waymo_open_dataset.utils import transform_utils
+from waymo_open_dataset.utils import test_utils
+from waymo_open_dataset.utils import box_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
 from adapter_lib import *
 
@@ -151,6 +153,8 @@ class Adapter:
         calib_context += "R0_rect" + ": " + " ".join(R0_rect) + '\n'
         for i in range(5):
             calib_context += "Tr_velo_to_cam_" + str(i) + ": " + " ".join(Tr_velo_to_cam[i]) + '\n'
+        calib_context += "timestamp_micros: " + str(frame.timestamp_micros) + '\n'
+        calib_context += "context_name: " + str(frame.context.name) + '\n'
         fp_calib.write(calib_context)
         fp_calib.close()
 
@@ -167,11 +171,9 @@ class Adapter:
             frame,
             range_images,
             range_image_top_pose)
-
         points_all = np.concatenate(points, axis=0)
         intensity_all = np.concatenate(intensity, axis=0)
         point_cloud = np.column_stack((points_all, intensity_all))
-
         pc_path = LIDAR_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.bin'
         point_cloud.tofile(pc_path)
 
@@ -185,6 +187,16 @@ class Adapter:
         for i in range(0,5):
         	if cam_type == 'all' or int(cam_type) == i:
         	   open(LABEL_PATH + str(i) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
+
+        # get point cloud in the frame
+        range_images, range_image_top_pose = self.parse_range_image_and_camera_projection(
+            frame)
+
+        points, intensity = self.convert_range_image_to_point_cloud(
+            frame,
+            range_images,
+            range_image_top_pose)
+        points_all = tf.convert_to_tensor(np.concatenate(points, axis=0), dtype=np.float32)
 
         # preprocess bounding box data
         id_to_bbox = dict()
@@ -224,7 +236,6 @@ class Adapter:
                     break
             if bounding_box == None or name == None:
                 continue
-
             my_type = self.__type_list[obj.type]
             truncated = 0
             occluded = 0
@@ -235,7 +246,10 @@ class Adapter:
             y = obj.box.center_y
             z = obj.box.center_z
             rotation_y = obj.box.heading
-
+            box = tf.convert_to_tensor([x, y, z, length, width, height, rotation_y], dtype=np.float32)
+            box = tf.reshape(box, (1,7))
+            num_points = box_utils.compute_num_points_in_box_3d(points_all, box)
+            num_points = num_points.numpy()[0]
             if kitti_format:
                 z -= height/2
                 
@@ -257,7 +271,7 @@ class Adapter:
             alpha = (rotation_y + beta - math.pi / 2) % (2 * math.pi)
 
             # save the labels
-            line = my_type + ' {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n'.format(round(truncated, 2),
+            line = my_type + ' {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n'.format(round(truncated, 2),
                                                                                    occluded,
                                                                                    round(alpha, 2),
                                                                                    round(bounding_box[0], 2),
@@ -270,10 +284,11 @@ class Adapter:
                                                                                    round(x, 2),
                                                                                    round(y, 2),
                                                                                    round(z, 2),
-                                                                                   round(rotation_y, 2))
+                                                                                   round(rotation_y, 2),
+                                                                                   num_points)
             line_all = line[:-1] + ' ' + name + '\n'
             # store the label
-            if cam_type =='all' or name == cam_type:
+            if (cam_type =='all' or name == cam_type):
                fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
                fp_label.write(line)
                recorded_label.append(line)
@@ -494,7 +509,7 @@ class Adapter:
             intensity.append(intensity_tensor.numpy()[:, 1])
 
         return points, intensity
-
+    
     def rgba(self, r):
         """Generates a color based on range.
         Args:
