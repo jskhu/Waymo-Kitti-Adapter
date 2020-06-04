@@ -2,7 +2,6 @@ import argparse
 import os
 
 import math
-# import time
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -14,14 +13,13 @@ from waymo_open_dataset.utils import transform_utils
 from waymo_open_dataset.utils import test_utils
 from waymo_open_dataset.utils import box_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
-from adapter_lib import *
+import adapter_lib
 
-import pdb
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will be converted)
-DATA_PATH = '/media/trail/harddrive/datasets/Waymo/original/validation'
+DATA_PATH = '/media/datasets/Waymo/original/training'
 # path to save kitti dataset
-KITTI_PATH = '/media/trail/harddrive/datasets/Waymo/waymo/validation'
+KITTI_PATH = '/media/datasets/Waymo/adapted/training'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = False
 LOCATION_NAME = ['location_sf']
@@ -37,11 +35,13 @@ CALIB_PATH = KITTI_PATH + '/calib'
 LIDAR_PATH = KITTI_PATH + '/velodyne'
 ###############################################################################
 
+
 class Adapter:
+
     def __init__(self):
         self.__lidar_list = ['_FRONT', '_FRONT_RIGHT', '_FRONT_LEFT', '_SIDE_RIGHT', '_SIDE_LEFT']
         self.__type_list = ['UNKNOWN', 'VEHICLE', 'PEDESTRIAN', 'SIGN', 'CYCLIST']
-        self.__file_names = []      
+        self.__file_names = []
 
     def cvt(self, args, folder, start_ind):
         """ convert dataset from Waymo to KITTI
@@ -49,15 +49,15 @@ class Adapter:
         return:
         """
         self.start_ind = start_ind
-        self.get_file_names(DATA_PATH + '/'+folder)
+        self.get_file_names(DATA_PATH + '/' + folder)
         print("Converting ..." + folder)
 
         self.create_folder(args.camera_type)
 
-        bar = progressbar.ProgressBar(maxval=len(self.__file_names)+1,
-                    widgets= [progressbar.Percentage(), ' ',
-                    progressbar.Bar(marker='>',left='[',right=']'),' ',
-                    progressbar.ETA()])
+        bar = progressbar.ProgressBar(maxval=len(self.__file_names) + 1,
+                                      widgets=[progressbar.Percentage(), ' ',
+                                               progressbar.Bar(marker='>', left='[', right=']'), ' ',
+                                               progressbar.ETA()])
 
         tf.enable_eager_execution()
         file_num = 1
@@ -73,23 +73,22 @@ class Adapter:
                 frame = open_dataset.Frame()
                 frame.ParseFromString(bytearray(data.numpy()))
 
-                if (frame_num%args.keyframe) == 0: 
+                if (frame_num % args.keyframe) == 0:
                     if LOCATION_FILTER == True and frame.context.stats.location not in LOCATION_NAME:
                         continue
                     if args.test == False:
-                    	label_exists = self.save_label(frame, frame_name, args.camera_type)
-                    
+                        label_exists = self.save_label(frame, frame_name, args.camera_type)
+
                     if args.test == label_exists:
                         frame_num += 1
                         continue
                     self.save_image(frame, frame_name, args.camera_type)
-   
+
                     self.save_calib(frame, frame_name)
 
                     self.save_lidar(frame, frame_name)
 
-                    # print("image:{}\ncalib:{}\nlidar:{}\nlabel:{}\n".format(str(s1-e1),str(s2-e2),str(s3-e3),str(s4-e4)))
-                    frame_name +=1
+                    frame_name += 1
 
                 frame_num += 1
             bar.update(file_num)
@@ -105,8 +104,9 @@ class Adapter:
                 :return:
         """
         for img in frame.images:
-            if cam_type == 'all' or cam_type == str(img.name-1):
-                img_path = IMAGE_PATH + str(img.name - 1) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
+            if cam_type == 'all' or cam_type == str(img.name - 1):
+                img_path = IMAGE_PATH + str(img.name - 1) + '/' + \
+                    str(frame_num).zfill(INDEX_LENGTH) + '.' + IMAGE_FORMAT
                 img = cv2.imdecode(np.frombuffer(img.image, np.uint8), cv2.IMREAD_COLOR)
                 rgb_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 plt.imsave(img_path, rgb_img, format=IMAGE_FORMAT)
@@ -118,33 +118,33 @@ class Adapter:
                 :return:
         """
         fp_calib = open(CALIB_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
-        waymo_cam_RT=np.array([0,-1,0,0,  0,0,-1,0,   1,0,0,0,    0 ,0 ,0 ,1]).reshape(4,4)
+        waymo_cam_RT = np.array([0, -1, 0, 0,  0, 0, -1, 0,   1, 0, 0, 0,    0, 0, 0, 1]).reshape(4, 4)
         camera_calib = []
         R0_rect = ["%e" % i for i in np.eye(3).flatten()]
         Tr_velo_to_cam = []
         calib_context = ''
 
         for camera in frame.context.camera_calibrations:
-            tmp=np.array(camera.extrinsic.transform).reshape(4,4)
-            tmp=np.linalg.inv(tmp)
-            axes_transformation = np.array([[0,-1,0,0],
-                                            [0,0,-1,0],
-                                            [1,0,0,0],
-                                            [0,0,0,1]])
+            tmp = np.array(camera.extrinsic.transform).reshape(4, 4)
+            tmp = np.linalg.inv(tmp)
+            axes_transformation = np.array([[0, -1, 0, 0],
+                                            [0, 0, -1, 0],
+                                            [1, 0, 0, 0],
+                                            [0, 0, 0, 1]])
             tmp = np.matmul(axes_transformation, tmp)
             tmp = tmp.reshape((16,))
             Tr_velo_to_cam.append(["%e" % i for i in tmp[0:12]])
 
         for cam in frame.context.camera_calibrations:
-            tmp=np.zeros((3,4))
-            tmp[0,0]=cam.intrinsic[0]
-            tmp[1,1]=cam.intrinsic[1]
-            tmp[0,2]=cam.intrinsic[2]
-            tmp[1,2]=cam.intrinsic[3]
-            tmp[2,2]=1
+            tmp = np.zeros((3, 4))
+            tmp[0, 0] = cam.intrinsic[0]
+            tmp[1, 1] = cam.intrinsic[1]
+            tmp[0, 2] = cam.intrinsic[2]
+            tmp[1, 2] = cam.intrinsic[3]
+            tmp[2, 2] = 1
             if not kitti_format:
-                tmp=(tmp @ waymo_cam_RT)
-            tmp=list(tmp.reshape(12))
+                tmp = (tmp @ waymo_cam_RT)
+            tmp = list(tmp.reshape(12))
             tmp = ["%e" % i for i in tmp]
             camera_calib.append(tmp)
 
@@ -184,9 +184,9 @@ class Adapter:
                 :return:
                 """
         fp_label_all = open(LABEL_ALL_PATH + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
-        for i in range(0,5):
-        	if cam_type == 'all' or int(cam_type) == i:
-        	   open(LABEL_PATH + str(i) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
+        for i in range(0, 5):
+            if cam_type == 'all' or int(cam_type) == i:
+                open(LABEL_PATH + str(i) + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
 
         # get point cloud in the frame
         range_images, range_image_top_pose = self.parse_range_image_and_camera_projection(
@@ -214,12 +214,12 @@ class Adapter:
 
         if kitti_format:
             for camera in frame.context.camera_calibrations:
-                tmp=np.array(camera.extrinsic.transform).reshape(4,4)
-                tmp=np.linalg.inv(tmp)
-                axes_transformation = np.array([[0,-1,0,0],
-                                            [0,0,-1,0],
-                                            [1,0,0,0],
-                                            [0,0,0,1]])
+                tmp = np.array(camera.extrinsic.transform).reshape(4, 4)
+                tmp = np.linalg.inv(tmp)
+                axes_transformation = np.array([[0, -1, 0, 0],
+                                                [0, 0, -1, 0],
+                                                [1, 0, 0, 0],
+                                                [0, 0, 0, 1]])
                 tmp = np.matmul(axes_transformation, tmp)
                 Tr_velo_to_cam.append(tmp)
 
@@ -247,63 +247,61 @@ class Adapter:
             z = obj.box.center_z
             rotation_y = obj.box.heading
             box = tf.convert_to_tensor([x, y, z, length, width, height, rotation_y], dtype=np.float32)
-            box = tf.reshape(box, (1,7))
+            box = tf.reshape(box, (1, 7))
             num_points = box_utils.compute_num_points_in_box_3d(points_all, box)
             num_points = num_points.numpy()[0]
             if kitti_format:
-                z -= height/2
-                
-                transform_box_to_cam = Tr_velo_to_cam[int(name)] @ get_box_transformation_matrix((x, y, z),(length,height,width), rotation_y)
-                pt1 = np.array([-0.5, 0.5, 0 , 1.])
-                pt2 = np.array([0.5, 0.5, 0 , 1.])
+                z -= height / 2
+
+                transform_box_to_cam = Tr_velo_to_cam[int(name)] @ \
+                    adapter_lib.get_box_transformation_matrix((x, y, z), (length, height, width), rotation_y)
+                pt1 = np.array([-0.5, 0.5, 0, 1.])
+                pt2 = np.array([0.5, 0.5, 0, 1.])
                 pt1 = np.matmul(transform_box_to_cam, pt1)
                 pt2 = np.matmul(transform_box_to_cam, pt2)
-                new_ry = math.atan2(pt2[2]-pt1[2],pt2[0]-pt1[0])
+                new_ry = math.atan2(pt2[2] - pt1[2], pt2[0] - pt1[0])
                 rotation_y = -new_ry
 
-                new_loc = np.matmul(Tr_velo_to_cam[int(name)], np.array([x,y,z,1]).T)
+                new_loc = np.matmul(Tr_velo_to_cam[int(name)], np.array([x, y, z, 1]).T)
                 x, y, z = new_loc[:3]
-
-                
-        
 
             beta = math.atan2(x, z)
             alpha = (rotation_y + beta - math.pi / 2) % (2 * math.pi)
 
             # save the labels
             line = my_type + ' {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n'.format(round(truncated, 2),
-                                                                                   occluded,
-                                                                                   round(alpha, 2),
-                                                                                   round(bounding_box[0], 2),
-                                                                                   round(bounding_box[1], 2),
-                                                                                   round(bounding_box[2], 2),
-                                                                                   round(bounding_box[3], 2),
-                                                                                   round(height, 2),
-                                                                                   round(width, 2),
-                                                                                   round(length, 2),
-                                                                                   round(x, 2),
-                                                                                   round(y, 2),
-                                                                                   round(z, 2),
-                                                                                   round(rotation_y, 2),
-                                                                                   num_points)
+                                                                                      occluded,
+                                                                                      round(alpha, 2),
+                                                                                      round(bounding_box[0], 2),
+                                                                                      round(bounding_box[1], 2),
+                                                                                      round(bounding_box[2], 2),
+                                                                                      round(bounding_box[3], 2),
+                                                                                      round(height, 2),
+                                                                                      round(width, 2),
+                                                                                      round(length, 2),
+                                                                                      round(x, 2),
+                                                                                      round(y, 2),
+                                                                                      round(z, 2),
+                                                                                      round(rotation_y, 2),
+                                                                                      num_points)
             line_all = line[:-1] + ' ' + name + '\n'
             # store the label
-            if (cam_type =='all' or name == cam_type):
-               fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
-               fp_label.write(line)
-               recorded_label.append(line)
-               fp_label.close()
+            if (cam_type == 'all' or name == cam_type):
+                fp_label = open(LABEL_PATH + name + '/' + str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'a')
+                fp_label.write(line)
+                recorded_label.append(line)
+                fp_label.close()
 
             fp_label_all.write(line_all)
         fp_label_all.close()
-        if len(recorded_label)==0: 
+        if len(recorded_label) == 0:
             return False
         return True
 
     def get_file_names(self, folder):
         for i in os.listdir(folder):
             if i.split('.')[-1] == 'tfrecord':
-                self.__file_names.append(folder + '/'+ i)
+                self.__file_names.append(folder + '/' + i)
 
     def create_folder(self, cam_type):
         if not os.path.exists(KITTI_PATH):
@@ -328,9 +326,9 @@ class Adapter:
                 :param lidar_num: the number of current lidar
                 :return:
                 """
-        intensity_0 = np.array(range_images[lidar_num][0].data).reshape(-1,4)
-        intensity_0 = intensity_0[:,1]
-        intensity_1 = np.array(range_images[lidar_num][1].data).reshape(-1,4)[:,1]
+        intensity_0 = np.array(range_images[lidar_num][0].data).reshape(-1, 4)
+        intensity_0 = intensity_0[:, 1]
+        intensity_1 = np.array(range_images[lidar_num][1].data).reshape(-1, 4)[:, 1]
         return intensity_0, intensity_1
 
     def image_show(self, data, name, layout, cmap=None):
@@ -425,11 +423,11 @@ class Adapter:
         range_image_intensity = range_image_tensor[..., 1]
         range_image_elongation = range_image_tensor[..., 2]
         self.plot_range_image_helper(range_image_range.numpy(), 'range',
-                                [8, 1, layout_index_start], vmax=75, cmap='gray')
+                                     [8, 1, layout_index_start], vmax=75, cmap='gray')
         self.plot_range_image_helper(range_image_intensity.numpy(), 'intensity',
-                                [8, 1, layout_index_start + 1], vmax=1.5, cmap='gray')
+                                     [8, 1, layout_index_start + 1], vmax=1.5, cmap='gray')
         self.plot_range_image_helper(range_image_elongation.numpy(), 'elongation',
-                                [8, 1, layout_index_start + 2], vmax=1.5, cmap='gray')
+                                     [8, 1, layout_index_start + 2], vmax=1.5, cmap='gray')
 
     def convert_range_image_to_point_cloud(self, frame, range_images, range_image_top_pose, ri_index=0):
         """Convert range images to point cloud.
@@ -500,7 +498,7 @@ class Adapter:
             points_tensor = tf.gather_nd(range_image_cartesian,
                                          tf.where(range_image_mask))
             intensity_tensor = tf.gather_nd(range_image_tensor,
-                                         tf.where(range_image_mask))
+                                            tf.where(range_image_mask))
             # cp = camera_projections[c.name][0]
             # cp_tensor = tf.reshape(tf.convert_to_tensor(cp.data), cp.shape.dims)
             # cp_points_tensor = tf.gather_nd(cp_tensor, tf.where(range_image_mask))
@@ -509,7 +507,7 @@ class Adapter:
             intensity.append(intensity_tensor.numpy()[:, 1])
 
         return points, intensity
-    
+
     def rgba(self, r):
         """Generates a color based on range.
         Args:
