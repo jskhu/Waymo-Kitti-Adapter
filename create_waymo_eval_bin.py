@@ -161,7 +161,7 @@ def create_bin(input_dir, output_dir, type_, calib_dir):
 
 
 def main(args):
-    #create_bin(input_dir=args.preds, output_dir=args.output_dir, type_="preds", calib_dir=args.calib)
+    create_bin(input_dir=args.preds, output_dir=args.output_dir, type_="preds", calib_dir=args.calib)
     create_bin(input_dir=args.gt, output_dir=args.output_dir, type_='gt', calib_dir=args.calib)
 
 
