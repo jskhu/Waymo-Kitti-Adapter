@@ -13,174 +13,163 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================*/
-"""A simple example to generate a file that contains serialized Objects proto."""
+"""Generates files that contains serialized Objects proto for ground truth and predictions."""
 
 from waymo_open_dataset import dataset_pb2
 from waymo_open_dataset import label_pb2
 from waymo_open_dataset.protos import metrics_pb2
 
-import pickle
+import argparse
 import os
-import pdb
+import numpy as np
+import math
 
 
-def _create_pd_file_example():
-    """Creates a prediction objects file."""
+def sigmoid(x):
+    return math.exp(-np.logaddexp(0, -x))
+
+
+class Object3d(object):
+
+    def __init__(self, line, type_):
+        self.label = line.strip().split(' ')
+        self.src = line
+        self.cls_type = self.label[0]
+        self.truncation = float(self.label[1])
+        self.occlusion = float(self.label[2])  # 0:fully visible 1:partly occluded 2:largely occluded 3:unknown
+        self.alpha = float(self.label[3])
+        self.box2d = np.array((float(self.label[4]),
+                               float(self.label[5]),
+                               float(self.label[6]),
+                               float(self.label[7])), dtype=np.float32)
+        self.h = float(self.label[8])
+        self.w = float(self.label[9])
+        self.l = float(self.label[10])
+        self.loc = np.array((float(self.label[11]), float(self.label[12]), float(self.label[13])), dtype=np.float32)
+        self.dis_to_cam = np.linalg.norm(self.loc)
+        self.ry = float(self.label[14])
+
+        self.num_pts = -1.0
+        self.score = 1.0
+
+        if type_ == "preds":
+            self.score = sigmoid(float(self.label[15]))
+        elif type_ == "gt":
+            self.num_pts = int(self.label[15])
+        else:
+            raise NotImplementedError
+
+
+class Calibration(object):
+
+    def __init__(self, calib_file):
+
+        with open(calib_file) as f:
+            lines = f.readlines()
+
+        obj = lines[0].strip().split(' ')[1:]
+        self.P2 = np.array(obj, dtype=np.float32).reshape(3, 4)
+
+        obj = lines[5].strip().split(' ')[1:]
+        self.R0 = np.array(obj, dtype=np.float32).reshape(3, 3)
+
+        obj = lines[6].strip().split(' ')[1:]
+        self.V2C = np.array(obj, dtype=np.float32).reshape(3, 4)
+
+    def cart_to_hom(self, pts):
+        """
+        :param pts: (N, 3 or 2)
+        :return pts_hom: (N, 4 or 3)
+        """
+        pts_hom = np.hstack((pts, np.ones((pts.shape[0], 1), dtype=np.float32)))
+        return pts_hom
+
+    def rect_to_lidar(self, pts_rect):
+        """
+        :param pts_lidar: (N, 3)
+        :return pts_rect: (N, 3)
+        """
+        pts_rect_hom = self.cart_to_hom(pts_rect)  # (N, 4)
+        R0_ext = np.hstack((self.R0, np.zeros((3, 1), dtype=np.float32)))  # (3, 4)
+        R0_ext = np.vstack((R0_ext, np.zeros((1, 4), dtype=np.float32)))  # (4, 4)
+        R0_ext[3, 3] = 1
+        V2C_ext = np.vstack((self.V2C, np.zeros((1, 4), dtype=np.float32)))  # (4, 4)
+        V2C_ext[3, 3] = 1
+
+        pts_lidar = np.dot(pts_rect_hom, np.linalg.inv(np.dot(R0_ext, V2C_ext).T))
+        return pts_lidar[:, 0:3]
+
+
+def get_objects_from_file(file, type_):
+    with open(file, "r") as f:
+        lines = f.readlines()
+    objects = [Object3d(line, type_) for line in lines]
+    return objects
+
+
+def create_bin(input_dir, output_dir, type_, calib_dir):
+
+    samples = sorted(os.listdir(input_dir))
     objects = metrics_pb2.Objects()
 
-    o = metrics_pb2.Object()
-    # The following 3 fields are used to uniquely identify a frame a prediction
-    # is predicted at. Make sure you set them to values exactly the same as what
-    # we provided in the raw data. Otherwise your prediction is considered as a
-    # false negative.
-    o.context_name = ('context_name for the prediction. See Frame::context::name '
-                      'in  dataset.proto.')
-    # The frame timestamp for the prediction. See Frame::timestamp_micros in
-    # dataset.proto.
-    invalid_ts = -1
-    o.frame_timestamp_micros = invalid_ts
-    # This is only needed for 2D detection or tracking tasks.
-    # Set it to the camera name the prediction is for.
-    o.camera_name = dataset_pb2.CameraName.FRONT
+    for sample in samples:
+        print("Processing sample {}".format(sample))
 
-    # Populating box and score.
-    box = label_pb2.Label.Box()
-    box.center_x = 0
-    box.center_y = 0
-    box.center_z = 0
-    box.length = 0
-    box.width = 0
-    box.height = 0
-    box.heading = 0
-    o.object.box.CopyFrom(box)
-    # This must be within [0.0, 1.0]. It is better to filter those boxes with
-    # small scores to speed up metrics computation.
-    o.score = 1
-    # For tracking, this must be set and it must be unique for each tracked
-    # sequence.
-    o.object.id = 'unique object tracking ID'
-    # Use correct type.
-    pdb.set_trace()
-    o.object.type = label_pb2.Label.TYPE_PEDESTRIAN
+        sample_file = os.path.join(input_dir, sample)
+        calib_file = os.path.join(calib_dir, sample)
 
-    objects.objects.append(o)
+        objects_ = get_objects_from_file(sample_file, type_)
+        calib = Calibration(calib_file)
 
-    # Add more objects. Note that a reasonable detector should limit its maximum
-    # number of boxes predicted per frame. A reasonable value is around 400. A
-    # huge number of boxes can slow down metrics computation.
-
-    # Write objects to a file.
-    f = open('/tmp/your_preds.bin', 'wb')
-    f.write(objects.SerializeToString())
-    f.close()
-
-
-def save_preds():
-    pred_infos = pickle.load(open('result_v5_80.pkl', "rb"))
-    gt_infos = pickle.load(open('waymo_infos_val_v5_80.pkl', "rb"))
-    objects = metrics_pb2.Objects()
-    scores = []
-    sample_idx = 0
-    for sample in pred_infos:
-        calib = gt_infos[sample_idx]['calib']
-        for i in range(0, sample['num_example']):
-            # [x, y, z, w, l, h, rz, gt_classes]
-            pred_box = sample['boxes_lidar'][i]
-            name = sample['name'][i]
+        for obj in objects_:
             o = metrics_pb2.Object()
-            o.context_name = (calib['Name'])
-            o.frame_timestamp_micros = calib['Timestamp']
+            o.context_name = (sample)
+            o.frame_timestamp_micros = -1
 
             # Populating box and score.
             box = label_pb2.Label.Box()
-            box.center_x = pred_box[0]
-            box.center_y = pred_box[1]
-            box.center_z = pred_box[2]
-            box.width = pred_box[3]
-            box.length = pred_box[4]
-            box.height = pred_box[5]
-            box.heading = pred_box[6]
+            loc_rect = np.expand_dims(obj.loc, axis=0)
+            loc_lidar = calib.rect_to_lidar(loc_rect).squeeze()
+            box.center_x = loc_lidar[0]
+            box.center_y = loc_lidar[1]
+            box.center_z = loc_lidar[2]
+
+            box.length = obj.l
+            box.width = obj.w
+            box.height = obj.h
+
+            box.heading = obj.ry
             o.object.box.CopyFrom(box)
-            # This must be within [0.0, 1.0]. It is better to filter those boxes with
-            # small scores to speed up metrics computation.
-            o.score = sample['score'][i]
-            scores.append(sample['score'][i])
+
+            if type_ == "gt":
+                # Add num pts
+                o.object.num_lidar_points_in_box = obj.num_pts
+                if obj.num_pts <= 0:
+                    continue
+
+            o.score = obj.score
+
             # Use correct type
-            class_name = 'TYPE_' + name
+            class_name = 'TYPE_' + obj.cls_type
             o.object.type = getattr(label_pb2.Label, class_name)
             objects.objects.append(o)
-        sample_idx += 1
-    f = open('preds.bin', 'wb')
-    f.write(objects.SerializeToString())
-    f.close()
+
+    output_file = os.path.join(output_dir, "{}.bin".format(type_))
+    print("writing to {}".format(output_file))
+    with open(output_file, 'wb') as f:
+        f.write(objects.SerializeToString())
 
 
-def save_gt():
-    gt_infos = pickle.load(open('waymo_infos_val_v5_80.pkl', "rb"))
-    objects = metrics_pb2.Objects()
-    for sample in gt_infos:
-        calib = sample['calib']
-        annos = sample['annos']
-        gt_boxes = annos['gt_boxes_lidar']
-        names = annos['name']
-        num_boxes = len(gt_boxes)
-        for i in range(0, num_boxes):
-            gt_box = gt_boxes[i]  # [x, y, z, w, l, h, rz, gt_classes]
-            name = names[i]
-            o = metrics_pb2.Object()
-            o.context_name = (calib['Name'])
-            o.frame_timestamp_micros = calib['Timestamp']
-
-            # Populating box and score.
-            box = label_pb2.Label.Box()
-            box.center_x = gt_box[0]
-            box.center_y = gt_box[1]
-            box.center_z = gt_box[2]
-            box.width = gt_box[3]
-            box.length = gt_box[4]
-            box.height = gt_box[5]
-            box.heading = gt_box[6]
-            o.score = 0.5
-            o.object.box.CopyFrom(box)
-            o.object.detection_difficulty_level = annos['difficulty'][i]
-            # Use correct type
-            class_name = 'TYPE_' + name
-            o.object.type = getattr(label_pb2.Label, class_name)
-            objects.objects.append(o)
-    f = open('val.bin', 'wb')
-    f.write(objects.SerializeToString())
-    f.close()
-
-
-def read_bin():
-    f = open('official_val.bin', 'rb')
-    content = f.read()
-    official_gt = metrics_pb2.Objects()
-    official_gt.ParseFromString(content)
-    f.close()
-    f = open('val.bin', 'rb')
-    content2 = f.read()
-    gt = metrics_pb2.Objects()
-    gt.ParseFromString(content2)
-    f = open('fake_ground_truths.bin', 'rb')
-    content3 = f.read()
-    objects3 = metrics_pb2.Objects()
-    objects3.ParseFromString(content3)
-    f = open('fake_predictions.bin', 'rb')
-    content4 = f.read()
-    objects4 = metrics_pb2.Objects()
-    objects4.ParseFromString(content4)
-    counter = 0
-    counter_all = 0
-    pdb.set_trace()
-
-
-def main():
-    #_create_pd_file_example()
-    # read_bin()
-    save_preds()
-    save_gt()
+def main(args):
+    create_bin(input_dir=args.preds, output_dir=args.output_dir, type_="preds", calib_dir=args.calib)
+    create_bin(input_dir=args.gt, output_dir=args.output_dir, type_='gt', calib_dir=args.calib)
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Generaate image sets')
+    parser.add_argument('--preds', type=str, default=None, help='Path to prediction text files')
+    parser.add_argument('--gt', type=str, default=None, help='Path to ground truth text files')
+    parser.add_argument('--calib', type=str, default=None, help='Path to calibration files')
+    parser.add_argument('--output_dir', type=str, default=None, help='Path to output folder')
+    args = parser.parse_args()
+    main(args)
