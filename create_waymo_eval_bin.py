@@ -48,7 +48,6 @@ class Object3d(object):
         self.loc = np.array((float(self.label[11]), float(self.label[12]), float(self.label[13])), dtype=np.float32)
         self.dis_to_cam = np.linalg.norm(self.loc)
         self.ry = float(self.label[14])
-        self.level_str = None
 
         self.num_pts = -1.0
         self.score = 1.0
@@ -57,26 +56,8 @@ class Object3d(object):
             self.score = sigmoid(float(self.label[15]))
         elif type_ == "gt":
             self.num_pts = int(self.label[15])
-            self.prepopulated_level = int(self.label[16])
         else:
             raise NotImplementedError
-
-        self.prepopulated_level = 1.0
-        self.level = self.get_obj_level()
-
-    def get_obj_level(self):
-        if self.prepopulated_level == 2:
-            self.level_str = 'LEVEL_2'
-            return 2
-        elif self.num_pts <= 5 and self.num_pts > 0:
-            self.level_str = 'LEVEL_2'
-            return 2
-        elif self.num_pts > 5:
-            self.level_str = 'LEVEL_1'
-            return 1
-        else:
-            self.level_str = 'UNKNOWN'
-            return 0
 
 
 def get_objects_from_file(file, type_):
@@ -116,7 +97,6 @@ def create_bin(input_dir, output_dir, type_):
             o.object.box.CopyFrom(box)
 
             if type_ == "gt":
-                o.object.detection_difficulty_level = getattr(label_pb2.Label, obj.level_str)
                 # Add num pts
                 o.object.num_lidar_points_in_box = obj.num_pts
                 if obj.num_pts <= 0:
