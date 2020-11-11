@@ -29,46 +29,6 @@ def sigmoid(x):
     return math.exp(-np.logaddexp(0, -x))
 
 
-def save_preds():
-    pred_infos = pickle.load(open('result_v5_80.pkl', "rb"))
-    gt_infos = pickle.load(open('waymo_infos_val_v5_80.pkl', "rb"))
-    objects = metrics_pb2.Objects()
-    scores = []
-    sample_idx = 0
-    for sample in pred_infos:
-        calib = gt_infos[sample_idx]['calib']
-        for i in range(0, sample['num_example']):
-            # [x, y, z, w, l, h, rz, gt_classes]
-            pred_box = sample['boxes_lidar'][i]
-            name = sample['name'][i]
-            o = metrics_pb2.Object()
-            o.context_name = (calib['Name'])
-            o.frame_timestamp_micros = calib['Timestamp']
-
-            # Populating box and score.
-            box = label_pb2.Label.Box()
-            box.center_x = pred_box[0]
-            box.center_y = pred_box[1]
-            box.center_z = pred_box[2]
-            box.width = pred_box[3]
-            box.length = pred_box[4]
-            box.height = pred_box[5]
-            box.heading = pred_box[6]
-            o.object.box.CopyFrom(box)
-            # This must be within [0.0, 1.0]. It is better to filter those boxes with
-            # small scores to speed up metrics computation.
-            o.score = sample['score'][i]
-            scores.append(sample['score'][i])
-            # Use correct type
-            class_name = 'TYPE_' + name
-            o.object.type = getattr(label_pb2.Label, class_name)
-            objects.objects.append(o)
-        sample_idx += 1
-    f = open('preds.bin', 'wb')
-    f.write(objects.SerializeToString())
-    f.close()
-
-
 class Object3d(object):
 
     def __init__(self, line, type_):
@@ -114,12 +74,9 @@ class Object3d(object):
         elif self.num_pts > 5:
             self.level_str = 'LEVEL_1'
             return 1
-        elif self.num_pts == 0:
-            self.level_str = 'Ignore'
-            return 0
         else:
-            self.level_str = 'UnKnown'
-            return -1
+            self.level_str = 'UNKNOWN'
+            return 0
 
 
 def get_objects_from_file(file, type_):
@@ -137,11 +94,11 @@ def create_bin(input_dir, output_dir, type_):
     for sample in samples:
 
         sample_file = os.path.join(input_dir, sample)
-        objects = get_objects_from_file(sample_file, type_)
+        objects_ = get_objects_from_file(sample_file, type_)
 
-        for obj in objects:
+        for obj in objects_:
             o = metrics_pb2.Object()
-            o.context_name = ('')
+            o.context_name = (sample)
             o.frame_timestamp_micros = -1
 
             # Populating box and score.
@@ -162,6 +119,8 @@ def create_bin(input_dir, output_dir, type_):
                 o.object.detection_difficulty_level = getattr(label_pb2.Label, obj.level_str)
                 # Add num pts
                 o.object.num_lidar_points_in_box = obj.num_pts
+                if obj.num_pts <= 0:
+                    continue
 
             o.score = obj.score
 
@@ -171,6 +130,7 @@ def create_bin(input_dir, output_dir, type_):
             objects.objects.append(o)
 
     output_file = os.path.join(output_dir, "{}.bin".format(type_))
+    print("writing to {}".format(output_file))
     with open(output_file, 'wb') as f:
         f.write(objects.SerializeToString())
 
