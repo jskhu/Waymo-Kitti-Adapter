@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================*/
-"""Generates a files that contains serialized Objects proto for ground truth and predictions."""
+"""Generates files that contains serialized Objects proto for ground truth and predictions."""
 
 from waymo_open_dataset import dataset_pb2
 from waymo_open_dataset import label_pb2
