@@ -60,6 +60,46 @@ class Object3d(object):
             raise NotImplementedError
 
 
+class Calibration(object):
+
+    def __init__(self, calib_file):
+
+        with open(calib_file) as f:
+            lines = f.readlines()
+
+        obj = lines[0].strip().split(' ')[1:]
+        self.P2 = np.array(obj, dtype=np.float32).reshape(3, 4)
+
+        obj = lines[5].strip().split(' ')[1:]
+        self.R0 = np.array(obj, dtype=np.float32).reshape(3, 3)
+
+        obj = lines[6].strip().split(' ')[1:]
+        self.V2C = np.array(obj, dtype=np.float32).reshape(3, 4)
+
+    def cart_to_hom(self, pts):
+        """
+        :param pts: (N, 3 or 2)
+        :return pts_hom: (N, 4 or 3)
+        """
+        pts_hom = np.hstack((pts, np.ones((pts.shape[0], 1), dtype=np.float32)))
+        return pts_hom
+
+    def rect_to_lidar(self, pts_rect):
+        """
+        :param pts_lidar: (N, 3)
+        :return pts_rect: (N, 3)
+        """
+        pts_rect_hom = self.cart_to_hom(pts_rect)  # (N, 4)
+        R0_ext = np.hstack((self.R0, np.zeros((3, 1), dtype=np.float32)))  # (3, 4)
+        R0_ext = np.vstack((R0_ext, np.zeros((1, 4), dtype=np.float32)))  # (4, 4)
+        R0_ext[3, 3] = 1
+        V2C_ext = np.vstack((self.V2C, np.zeros((1, 4), dtype=np.float32)))  # (4, 4)
+        V2C_ext[3, 3] = 1
+
+        pts_lidar = np.dot(pts_rect_hom, np.linalg.inv(np.dot(R0_ext, V2C_ext).T))
+        return pts_lidar[:, 0:3]
+
+
 def get_objects_from_file(file, type_):
     with open(file, "r") as f:
         lines = f.readlines()
@@ -67,15 +107,19 @@ def get_objects_from_file(file, type_):
     return objects
 
 
-def create_bin(input_dir, output_dir, type_):
+def create_bin(input_dir, output_dir, type_, calib_dir):
 
     samples = sorted(os.listdir(input_dir))
     objects = metrics_pb2.Objects()
 
     for sample in samples:
+        print("Processing sample {}".format(sample))
 
         sample_file = os.path.join(input_dir, sample)
+        calib_file = os.path.join(calib_dir, sample)
+
         objects_ = get_objects_from_file(sample_file, type_)
+        calib = Calibration(calib_file)
 
         for obj in objects_:
             o = metrics_pb2.Object()
@@ -84,14 +128,15 @@ def create_bin(input_dir, output_dir, type_):
 
             # Populating box and score.
             box = label_pb2.Label.Box()
-            box.center_x = obj.loc[0]
-            box.center_y = obj.loc[1]
-            box.center_z = obj.loc[2]
+            loc_rect = np.expand_dims(obj.loc, axis=0)
+            loc_lidar = calib.rect_to_lidar(loc_rect).squeeze()
+            box.center_x = loc_lidar[0]
+            box.center_y = loc_lidar[1]
+            box.center_z = loc_lidar[2]
 
-            # Check these
             box.length = obj.l
-            box.width = obj.h
-            box.height = obj.w
+            box.width = obj.w
+            box.height = obj.h
 
             box.heading = obj.ry
             o.object.box.CopyFrom(box)
@@ -116,14 +161,15 @@ def create_bin(input_dir, output_dir, type_):
 
 
 def main(args):
-    create_bin(input_dir=args.preds, output_dir=args.output_dir, type_="preds", )
-    create_bin(input_dir=args.gt, output_dir=args.output_dir, type_='gt')
+    #create_bin(input_dir=args.preds, output_dir=args.output_dir, type_="preds", calib_dir=args.calib)
+    create_bin(input_dir=args.gt, output_dir=args.output_dir, type_='gt', calib_dir=args.calib)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generaate image sets')
     parser.add_argument('--preds', type=str, default=None, help='Path to prediction text files')
     parser.add_argument('--gt', type=str, default=None, help='Path to ground truth text files')
+    parser.add_argument('--calib', type=str, default=None, help='Path to calibration files')
     parser.add_argument('--output_dir', type=str, default=None, help='Path to output folder')
     args = parser.parse_args()
     main(args)
