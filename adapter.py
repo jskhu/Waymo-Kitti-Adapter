@@ -1,11 +1,13 @@
 import argparse
 import os
+from pathlib import Path
 
 import math
 # import time
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from parso import split_lines
 import tensorflow as tf
 import progressbar
 
@@ -20,9 +22,10 @@ import pdb
 ############################Config###########################################
 # path to waymo dataset "folder" (all .tfrecord files in that folder will
 # be converted)
-DATA_PATH = '/media/trail/harddrive/datasets/Waymo/original/validation'
+RAW_DATA_PATH = '/mnt/storage/datasets/waymo/raw_data'
+IMAGESET_PATH = '/home/jordan/trail/FusionDet/data/waymo/ImageSets/train.txt'
 # path to save kitti dataset
-KITTI_PATH = '/media/trail/harddrive/datasets/Waymo/waymo/validation'
+KITTI_PATH = '/mnt/storage/datasets/waymo/fusion/kitti_format/training'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = False
 LOCATION_NAME = ['location_sf']
@@ -51,14 +54,14 @@ class Adapter:
         self.T_front_cam_to_ref = []
         self.T_vehicle_to_front_cam = []
 
-    def cvt(self, args, folder, start_ind):
+    def cvt(self, args, data_records, start_ind):
         """ convert dataset from Waymo to KITTI
         Args:
         return:
         """
         self.start_ind = start_ind
-        self.get_file_names(DATA_PATH + '/' + folder)
-        print("Converting ..." + folder)
+        self.set_file_names(RAW_DATA_PATH, data_records)
+        print("Converting ..." + RAW_DATA_PATH)
 
         self.create_folder(args.camera_type)
 
@@ -68,7 +71,7 @@ class Adapter:
                                                    marker='>', left='[', right=']'), ' ',
                                                progressbar.ETA()])
 
-        tf.enable_eager_execution()
+        # tf.enable_eager_execution()
         file_num = 1
         frame_num = 0
         frame_name = self.start_ind
@@ -205,7 +208,7 @@ class Adapter:
                 :param frame_num: the current frame number
                 :return:
                 """
-    
+
 
         # get point cloud in the frame
         range_images, range_image_top_pose = self.parse_range_image_and_camera_projection(
@@ -217,7 +220,7 @@ class Adapter:
             range_image_top_pose)
         points_all = tf.convert_to_tensor(
             np.concatenate(points, axis=0), dtype=np.float32)
-        
+
         # preprocess bounding box data
         id_to_bbox = dict()
         id_to_name = dict()
@@ -228,7 +231,7 @@ class Adapter:
                         label.box.center_x + label.box.length / 2, label.box.center_y + label.box.width / 2]
                 id_to_bbox[label.id] = bbox
                 id_to_name[label.id] = name - 1
-        
+
         Tr_velo_to_cam = []
         recorded_label = []
         label_lines = ''
@@ -273,12 +276,12 @@ class Adapter:
             x = obj.box.center_x
             y = obj.box.center_y
             z = obj.box.center_z - height/2
-            
+
             if check_label_exists == False:
                 pt_ref = self.cart_to_homo(self.T_front_cam_to_ref) @ self.T_vehicle_to_front_cam @ np.array([x,y,z,1]).reshape((4,1))
                 x, y, z, _ = pt_ref.flatten().tolist()
 
-            rotation_y = -obj.box.heading - np.pi/2 
+            rotation_y = -obj.box.heading - np.pi/2
 
             beta = math.atan2(x, z)
             alpha = (rotation_y + beta - math.pi / 2) % (2 * math.pi)
@@ -321,7 +324,7 @@ class Adapter:
 
         if len(recorded_label) == 0:
             return False
-        else: 
+        else:
             fp_label_all = open(LABEL_ALL_PATH + '/' +
                             str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
             fp_label = open(LABEL_PATH + '/' +
@@ -381,6 +384,10 @@ class Adapter:
         fp_image_calib.write(calib_context)
         fp_image_calib.close()
 
+    def set_file_names(self, raw_data_path, data_records):
+        for data_record in data_records:
+            self.__file_names.append(raw_data_path + '/' + data_record)
+
     def get_file_names(self, folder):
         for i in os.listdir(folder):
             if i.split('.')[-1] == 'tfrecord':
@@ -395,22 +402,11 @@ class Adapter:
         else:
             raise ValueError(mat.shape)
         return ret
-    
+
     def create_folder(self, cam_type):
-        if not os.path.exists(KITTI_PATH):
-            os.mkdir(KITTI_PATH)
-        if not os.path.exists(CALIB_PATH):
-            os.mkdir(CALIB_PATH)
-        if not os.path.exists(LIDAR_PATH):
-            os.mkdir(LIDAR_PATH)
-        if not os.path.exists(LABEL_ALL_PATH):
-            os.mkdir(LABEL_ALL_PATH)
-        if not os.path.exists(IMG_CALIB_PATH):
-            os.mkdir(IMG_CALIB_PATH)
-        if not os.path.exists(IMAGE_PATH):
-            os.mkdir(IMAGE_PATH)
-        if not os.path.exists(LABEL_PATH):
-            os.mkdir(LABEL_PATH)
+        dirs = [KITTI_PATH, CALIB_PATH, LIDAR_PATH, LABEL_ALL_PATH, IMG_CALIB_PATH, IMAGE_PATH, LABEL_PATH]
+        for dir in dirs:
+            os.makedirs(dir, exist_ok=True)
 
     def extract_intensity(self, frame, range_images, lidar_num):
         """ extract the intensity from the original range image
@@ -450,32 +446,32 @@ class Adapter:
         # range_image_top_pose = None
         for laser in frame.lasers:
             if len(laser.ri_return1.range_image_compressed) > 0:
-                range_image_str_tensor = tf.decode_compressed(
+                range_image_str_tensor = tf.io.decode_compressed(
                     laser.ri_return1.range_image_compressed, 'ZLIB')
                 ri = open_dataset.MatrixFloat()
                 ri.ParseFromString(bytearray(range_image_str_tensor.numpy()))
                 self.__range_images[laser.name] = [ri]
 
                 if laser.name == open_dataset.LaserName.TOP:
-                    range_image_top_pose_str_tensor = tf.decode_compressed(
+                    range_image_top_pose_str_tensor = tf.io.decode_compressed(
                         laser.ri_return1.range_image_pose_compressed, 'ZLIB')
                     range_image_top_pose = open_dataset.MatrixFloat()
                     range_image_top_pose.ParseFromString(
                         bytearray(range_image_top_pose_str_tensor.numpy()))
 
-                # camera_projection_str_tensor = tf.decode_compressed(
+                # camera_projection_str_tensor = tf.io.decode_compressed(
                 #     laser.ri_return1.camera_projection_compressed, 'ZLIB')
                 # cp = open_dataset.MatrixInt32()
                 # cp.ParseFromString(bytearray(camera_projection_str_tensor.numpy()))
                 # camera_projections[laser.name] = [cp]
             if len(laser.ri_return2.range_image_compressed) > 0:
-                range_image_str_tensor = tf.decode_compressed(
+                range_image_str_tensor = tf.io.decode_compressed(
                     laser.ri_return2.range_image_compressed, 'ZLIB')
                 ri = open_dataset.MatrixFloat()
                 ri.ParseFromString(bytearray(range_image_str_tensor.numpy()))
                 self.__range_images[laser.name].append(ri)
                 #
-                # camera_projection_str_tensor = tf.decode_compressed(
+                # camera_projection_str_tensor = tf.io.decode_compressed(
                 #     laser.ri_return2.camera_projection_compressed, 'ZLIB')
                 # cp = open_dataset.MatrixInt32()
                 # cp.ParseFromString(bytearray(camera_projection_str_tensor.numpy()))
@@ -670,9 +666,13 @@ if __name__ == '__main__':
                         help='if true, does not save any ground truth data')
     args = parser.parse_args()
     start_ind = args.start_ind
-    path, dirs, files = next(os.walk(DATA_PATH))
-    dirs.sort()
-    for directory in dirs:
-        adapter = Adapter()
-        last_ind = adapter.cvt(args, directory, start_ind)
-        start_ind = last_ind
+    with open(IMAGESET_PATH, 'r') as f:
+        data_records = f.read().splitlines()
+    # path, dirs, files = next(os.walk(DATA_PATH))
+    adapter = Adapter()
+    last_ind = adapter.cvt(args, data_records, start_ind)
+    # dirs.sort()
+    # for directory in dirs:
+    #     adapter = Adapter()
+    #     last_ind = adapter.cvt(args, directory, start_ind)
+    #     start_ind = last_ind
