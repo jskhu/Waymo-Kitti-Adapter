@@ -25,7 +25,7 @@ import pdb
 RAW_DATA_PATH = '/mnt/storage/datasets/waymo/raw_data'
 IMAGESET_PATH = '/home/jordan/trail/FusionDet/data/waymo/ImageSets/train.txt'
 # path to save kitti dataset
-KITTI_PATH = '/mnt/storage/datasets/waymo/fusion/kitti_format/training'
+KITTI_PATH = '/mnt/storage/datasets/waymo/fusion/kitti_format_v2/training'
 # location filter, use this to convert your preferred location
 LOCATION_FILTER = False
 LOCATION_NAME = ['location_sf']
@@ -191,13 +191,14 @@ class Adapter:
         range_images, range_image_top_pose = self.parse_range_image_and_camera_projection(
             frame)
 
-        points, intensity = self.convert_range_image_to_point_cloud(
+        points, intensity, elongation = self.convert_range_image_to_point_cloud(
             frame,
             range_images,
             range_image_top_pose)
         points_all = np.concatenate(points, axis=0)
         intensity_all = np.concatenate(intensity, axis=0)
-        point_cloud = np.column_stack((points_all, intensity_all))
+        elongation_all = np.concatenate(elongation, axis=0)
+        point_cloud = np.column_stack((points_all, intensity_all, elongation_all))
         pc_path = LIDAR_PATH + '/' + \
             str(frame_num).zfill(INDEX_LENGTH) + '.bin'
         point_cloud.tofile(pc_path)
@@ -214,7 +215,7 @@ class Adapter:
         range_images, range_image_top_pose = self.parse_range_image_and_camera_projection(
             frame)
 
-        points, intensity = self.convert_range_image_to_point_cloud(
+        points, intensity, elongation = self.convert_range_image_to_point_cloud(
             frame,
             range_images,
             range_image_top_pose)
@@ -543,6 +544,7 @@ class Adapter:
         points = []
         # cp_points = []
         intensity = []
+        elongation = []
 
         frame_pose = tf.convert_to_tensor(
             np.reshape(np.array(frame.pose.transform), [4, 4]))
@@ -601,8 +603,9 @@ class Adapter:
             points.append(points_tensor.numpy())
             # cp_points.append(cp_points_tensor.numpy())
             intensity.append(intensity_tensor.numpy()[:, 1])
+            elongation.append(intensity_tensor.numpy()[:, 2])
 
-        return points, intensity
+        return points, intensity, elongation
 
     def rgba(self, r):
         """Generates a color based on range.
