@@ -35,6 +35,7 @@ INDEX_LENGTH = 15
 IMAGE_FORMAT = 'png'
 # do not change
 LABEL_PATH = KITTI_PATH + '/label_0'
+CAM_LABEL_PATH = KITTI_PATH + '/cam_label_0'
 LABEL_ALL_PATH = KITTI_PATH + '/label_all'
 IMAGE_PATH = KITTI_PATH + '/image_0'
 CALIB_PATH = KITTI_PATH + '/calib'
@@ -98,6 +99,10 @@ class Adapter:
 
                     self.save_label(
                         frame, frame_name, args.camera_type)
+
+                    # Save 2d labels labelled in image, NOT projected lidar labels
+                    # Does not handle args.camera_type == all
+                    self.save_cam_label(frame, frame_name, args.camera_type)
 
                     self.save_image(frame, frame_name, args.camera_type)
 
@@ -336,6 +341,53 @@ class Adapter:
             fp_label_all.close()
             return True
 
+    def save_cam_label(self, frame, frame_num, cam_type, kitti_format=False, check_label_exists = False):
+        """ parse and save the label data in .txt format
+                :param frame: open dataset frame proto
+                :param frame_num: the current frame number
+                :return:
+                """
+
+
+        label_lines = ''
+        recorded_label = []
+        cam_type = int(cam_type)
+
+        for labels in frame.camera_labels:
+            name = labels.name - 1
+            if name != cam_type:
+                continue
+            for label in labels.labels:
+                bbox = [label.box.center_x - label.box.length / 2, label.box.center_y - label.box.width / 2,
+                        label.box.center_x + label.box.length / 2, label.box.center_y + label.box.width / 2]
+                my_type = self.__type_list[label.type]
+                line = my_type + ' {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n'.format(
+                    -1,
+                    -1,
+                    -10,
+                    round(
+                    bbox[0], 2),
+                    round(
+                    bbox[1], 2),
+                    round(
+                    bbox[2], 2),
+                    round(
+                    bbox[3], 2),
+                    -1,
+                    -1,
+                    -1,
+                    -1000,
+                    -1000,
+                    -1000,
+                    -10,
+                    1.0)
+                label_lines += line
+                recorded_label.append(line)
+        fp_label = open(CAM_LABEL_PATH + '/' +
+                            str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
+        fp_label.write(label_lines)
+        fp_label.close()
+            
     def save_image_calib(self, frame, frame_num):
         fp_image_calib = open(IMG_CALIB_PATH + '/' +
                               str(frame_num).zfill(INDEX_LENGTH) + '.txt', 'w+')
@@ -405,7 +457,7 @@ class Adapter:
         return ret
 
     def create_folder(self, cam_type):
-        dirs = [KITTI_PATH, CALIB_PATH, LIDAR_PATH, LABEL_ALL_PATH, IMG_CALIB_PATH, IMAGE_PATH, LABEL_PATH]
+        dirs = [KITTI_PATH, CALIB_PATH, LIDAR_PATH, LABEL_ALL_PATH, IMG_CALIB_PATH, IMAGE_PATH, LABEL_PATH, CAM_LABEL_PATH]
         for dir in dirs:
             os.makedirs(dir, exist_ok=True)
 
